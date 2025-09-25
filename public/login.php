@@ -19,7 +19,7 @@
       background: #fff;
       padding: 2rem 2.5rem;
       border-radius: 1rem;
-      box-shadow: 0 0.5rem 1rem rgba(74, 0, 245, 0.1);
+      box-shadow: 0 0.8rem 1rem rgba(15, 25, 231, 0.1);
       width: 100%;
       max-width: 400px;
     }
