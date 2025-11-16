@@ -4,6 +4,9 @@ require_once '../config/config.php';
 // Require login for this page
 requireLogin();
 
+// Define available hostels
+$hostels = ['Sone A', 'Sone B', 'Koshi', 'Koshi Ext.', 'Baghmati', 'Ganga'];
+
 // Fetch categories for the dropdown
 $stmt = $conn->query("SELECT id, name FROM categories");
 $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -165,8 +168,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="hostel" class="form-label">Hostel*</label>
-                                    <input type="text" class="form-control" id="hostel" name="hostel" required
-                                        value="<?php echo isset($_POST['hostel']) ? htmlspecialchars($_POST['hostel']) : ''; ?>">
+                                    <select class="form-control" id="hostel" name="hostel" required>
+                                        <option value="">-- Select Hostel --</option>
+                                        <?php foreach ($hostels as $hostel_option): ?>
+                                            <option value="<?php echo htmlspecialchars($hostel_option); ?>" 
+                                                <?php echo (isset($_POST['hostel']) && $_POST['hostel'] === $hostel_option) ? 'selected' : ''; ?>>
+                                                <?php echo htmlspecialchars($hostel_option); ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label for="room_number" class="form-label">Room Number</label>

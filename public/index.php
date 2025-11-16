@@ -3,12 +3,27 @@ require_once '../config/config.php';
 
 // Require login for this page
 requireLogin();
-// Fetch issues ordered by votes and recency
-$stmt = $conn->query("SELECT i.*, (i.upvotes - i.downvotes) AS score,
+
+// Fetch current user's hostel
+$stmt = $conn->prepare("SELECT hostel FROM users WHERE id = ?");
+$stmt->execute([$_SESSION['user_id']]);
+$user_data = $stmt->fetch(PDO::FETCH_ASSOC);
+$user_hostel = $user_data['hostel'] ?? null;
+
+// Fetch issues ordered by votes and recency, filtered by user's hostel
+$query = "SELECT i.*, (i.upvotes - i.downvotes) AS score,
   (SELECT photo_url FROM issue_photos p WHERE p.issue_id = i.id LIMIT 1) AS photo_url,
   (SELECT GROUP_CONCAT(c.name SEPARATOR ', ') FROM issue_categories ic JOIN categories c ON ic.category_id = c.id WHERE ic.issue_id = i.id) AS categories
-  FROM issues i
-  ORDER BY (i.upvotes - i.downvotes) DESC, i.created_at DESC");
+  FROM issues i";
+
+if ($user_hostel) {
+  $query .= " WHERE i.hostel = ?";
+  $stmt = $conn->prepare($query . " ORDER BY (i.upvotes - i.downvotes) DESC, i.created_at DESC");
+  $stmt->execute([$user_hostel]);
+} else {
+  $stmt = $conn->query($query . " ORDER BY (i.upvotes - i.downvotes) DESC, i.created_at DESC");
+}
+
 $issues = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Fetch current user's votes
@@ -29,14 +44,83 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $v) {
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
 
+    <style>
+        /* Image carousel styles */
+        .issue-image-container {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .issue-image-wrapper {
+            width: 100%;
+            height: 100%;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .issue-image-wrapper.active {
+            display: flex;
+        }
+        .issue-image-wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
+        .image-nav-arrow {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            font-size: 18px;
+            border-radius: 3px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 10;
+        }
+        .issue-image-container:hover .image-nav-arrow {
+            opacity: 1;
+        }
+        .image-nav-arrow:hover {
+            background: rgba(0, 0, 0, 0.8);
+        }
+        .image-nav-arrow.left {
+            left: 5px;
+        }
+        .image-nav-arrow.right {
+            right: 5px;
+        }
+        .image-counter {
+            position: absolute;
+            bottom: 5px;
+            right: 5px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            z-index: 5;
+        }
+    </style>
+
     <title>Dashboard | Smart Campus</title>
   </head>
   <body>
     <nav class="navbar navbar-expand-lg navbar-light bg-light">
       <div class="container">
         <a class="navbar-brand" href="#">Smart Campus</a>
-        <div class="ms-auto">
+        <div class="ms-auto d-flex align-items-center gap-2">
           <a href="submit_issue.php" class="btn btn-primary me-2">Submit New Issue</a>
+          <a href="profile.php" class="btn btn-outline-secondary me-2" title="Profile">
+            <i class="bi bi-person-circle">👤</i> Profile
+          </a>
           <form action="logout.php" method="post" class="d-inline">
             <button type="submit" class="btn btn-outline-danger">Logout</button>
           </form>
@@ -56,7 +140,12 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $v) {
       <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
           <h4 class="mb-0">Welcome to Smart Campus</h4>
-          <small class="text-muted">You are logged in as: <?php echo htmlspecialchars($_SESSION['email']); ?></small>
+          <small class="text-muted">
+            You are logged in as: <?php echo htmlspecialchars($_SESSION['email']); ?> 
+            <?php if ($user_hostel): ?>
+              | Viewing issues from: <strong><?php echo htmlspecialchars($user_hostel); ?></strong>
+            <?php endif; ?>
+          </small>
         </div>
       </div>
 
@@ -70,9 +159,34 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $v) {
         <?php foreach ($issues as $issue): ?>
           <div class="col-md-6 col-lg-4" id="issue-card-<?php echo $issue['id']; ?>">
             <div class="card h-100">
-              <?php if (!empty($issue['photo_url'])): ?>
-                <img src="/SBM/smart-campus/<?php echo htmlspecialchars($issue['photo_url']); ?>" class="card-img-top" alt="issue photo" style="max-height:200px; object-fit:cover;">
+              <!-- Issue Images with Navigation -->
+              <?php 
+              // Fetch images for this issue
+              $img_stmt = $conn->prepare('SELECT photo_url FROM issue_photos WHERE issue_id = ? ORDER BY uploaded_at ASC');
+              $img_stmt->execute([$issue['id']]);
+              $images = $img_stmt->fetchAll(PDO::FETCH_ASSOC);
+              ?>
+              <?php if (!empty($images)): ?>
+                <div class="issue-image-container" data-issue-id="<?php echo $issue['id']; ?>">
+                  <?php foreach ($images as $idx => $img): ?>
+                    <div class="issue-image-wrapper <?php echo $idx === 0 ? 'active' : ''; ?>" data-index="<?php echo $idx; ?>">
+                      <img src="/SBM/smart-campus/<?php echo htmlspecialchars($img['photo_url']); ?>" alt="Issue photo">
+                    </div>
+                  <?php endforeach; ?>
+                  
+                  <?php if (count($images) > 1): ?>
+                    <button class="image-nav-arrow left" data-issue-id="<?php echo $issue['id']; ?>" data-direction="prev">&larr;</button>
+                    <button class="image-nav-arrow right" data-issue-id="<?php echo $issue['id']; ?>" data-direction="next">&rarr;</button>
+                  <?php endif; ?>
+                  
+                  <div class="image-counter"><?php echo count($images) > 1 ? '1 / ' . count($images) : '1 / 1'; ?></div>
+                </div>
+              <?php else: ?>
+                <div class="issue-image-container" style="display: flex; align-items: center; justify-content: center;">
+                  <span class="text-muted">No images</span>
+                </div>
               <?php endif; ?>
+
               <div class="card-body d-flex flex-column">
                 <h5 class="card-title"><?php echo htmlspecialchars($issue['title']); ?></h5>
                 <?php if (!empty($issue['categories'])): ?>
@@ -119,6 +233,38 @@ foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $v) {
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
 
     <script>
+      // Image carousel navigation
+      document.querySelectorAll('.image-nav-arrow').forEach(arrow => {
+        arrow.addEventListener('click', function() {
+          const issueId = this.getAttribute('data-issue-id');
+          const direction = this.getAttribute('data-direction');
+          const container = document.querySelector(`[data-issue-id="${issueId}"].issue-image-container`);
+          
+          if (!container) return;
+          
+          const wrappers = container.querySelectorAll('.issue-image-wrapper');
+          const activeWrapper = container.querySelector('.issue-image-wrapper.active');
+          const currentIndex = Array.from(wrappers).indexOf(activeWrapper);
+          
+          let nextIndex;
+          if (direction === 'next') {
+            nextIndex = (currentIndex + 1) % wrappers.length;
+          } else {
+            nextIndex = (currentIndex - 1 + wrappers.length) % wrappers.length;
+          }
+          
+          // Update active wrapper
+          wrappers.forEach(w => w.classList.remove('active'));
+          wrappers[nextIndex].classList.add('active');
+          
+          // Update counter
+          const counter = container.querySelector('.image-counter');
+          if (counter) {
+            counter.textContent = (nextIndex + 1) + ' / ' + wrappers.length;
+          }
+        });
+      });
+
       // Voting JS
       async function postVote(issueId, action, buttonEl) {
         try {
